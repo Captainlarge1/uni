@@ -31,9 +31,9 @@ static void *simulator_routine(void *arg)
     int thread_id = *((int *)arg);
     
     // Log thread start with thread type identification
-    pthread_mutex_lock(&global_print_mutex);
-    printf("Simulator worker thread %d started\n", thread_id);
-    pthread_mutex_unlock(&global_print_mutex);
+    char message[100];
+    sprintf(message, "Simulator worker thread %d started", thread_id);
+    logger_write(message);
     
     free(arg);
 
@@ -90,9 +90,8 @@ static void *simulator_routine(void *arg)
             else
             {
                 pthread_mutex_unlock(&process_table_mutex); // Unlock in case of unexpected result
-                pthread_mutex_lock(&global_print_mutex);
-                printf("Unexpected result.reason: %d for process %u\n", result.reason, pid);
-                pthread_mutex_unlock(&global_print_mutex);
+                sprintf(message, "Unexpected result.reason: %d for process %u", result.reason, pid);
+                logger_write(message);
             }
         }
         else
@@ -102,9 +101,6 @@ static void *simulator_routine(void *arg)
         }
     }
 
-    pthread_mutex_lock(&global_print_mutex);
-    printf("Simulator worker thread %d exiting\n", thread_id);
-    pthread_mutex_unlock(&global_print_mutex);
     
     return NULL;
 }
@@ -222,7 +218,7 @@ void simulator_start(int thread_count_param, int max_processes)
     }
 
     // Initialize threads
-    thread_count = thread_count_param * 2;  // Double the thread count for both types
+    thread_count = 2;  // Only create 2 simulator threads
     threads = malloc(sizeof(pthread_t) * thread_count);
     if (threads == NULL)
     {
@@ -244,7 +240,7 @@ void simulator_start(int thread_count_param, int max_processes)
 
     simulator_running = 1;
 
-    // Create all simulator threads with sequential IDs (0 to thread_count-1)
+    // Create the 2 simulator threads with sequential IDs (0 to 1)
     for (int i = 0; i < thread_count; i++)
     {
         int *thread_id = malloc(sizeof(int));
@@ -398,6 +394,8 @@ void simulator_event()
 
         // Log the action
         char message[100];
+        sprintf(message, "Moved process %u to the ready queue from event queue", pid);
+        logger_write(message);
     }
     else
     {
