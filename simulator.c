@@ -109,7 +109,7 @@ static void *simulator_routine(void *arg)
 
 void simulator_start(int thread_count_param, int max_processes)
 {
-    
+
     max_pid_count = max_processes;
 
     // Calculate initial queue sizes based on max_processes
@@ -150,9 +150,10 @@ void simulator_start(int thread_count_param, int max_processes)
         return;
     }
     memset(process_table, 0, sizeof(ProcessControlBlockT) * max_processes);
-    
+
     // Initialize all PCBs to unallocated state
-    for (ProcessIdT pid = 0; pid < max_processes; pid++) {
+    for (ProcessIdT pid = 0; pid < max_processes; pid++)
+    {
         process_table[pid].state = unallocated;
         process_table[pid].pid = pid;
         process_table[pid].PC = 0;
@@ -188,7 +189,7 @@ void simulator_start(int thread_count_param, int max_processes)
     }
 
     // Set up simulator threads
-    thread_count = 2;  // Use exactly 2 worker threads
+    thread_count = 2; // Use exactly 2 worker threads
     threads = malloc(sizeof(pthread_t) * thread_count);
     if (threads == NULL)
     {
@@ -219,8 +220,6 @@ void simulator_start(int thread_count_param, int max_processes)
             return;
         }
     }
-
-
 }
 
 void simulator_stop()
@@ -244,8 +243,10 @@ void simulator_stop()
 
     // Clean up any remaining processes
     pthread_mutex_lock(&process_table_mutex);
-    for (ProcessIdT pid = 0; pid < max_pid_count; pid++) {
-        if (process_table[pid].state != unallocated) {
+    for (ProcessIdT pid = 0; pid < max_pid_count; pid++)
+    {
+        if (process_table[pid].state != unallocated)
+        {
             process_table[pid].state = terminated;
             char message[100];
         }
@@ -288,8 +289,6 @@ void simulator_stop()
     pthread_mutex_destroy(&ready_queue_mutex);
     pthread_mutex_destroy(&simulator_state_mutex);
     pthread_mutex_destroy(&process_table_mutex);
-
- 
 }
 
 ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by value

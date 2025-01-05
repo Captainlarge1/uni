@@ -52,20 +52,64 @@ static void *blocking_routine(void *arg)
     return NULL;
 }
 
+static void *infinite_routine(void *arg)
+{
+    unsigned int thread_id = *((unsigned int *)arg);
+    free(arg);
+
+    ProcessIdT *pids = malloc(sizeof(ProcessIdT) * batch_size_var);
+    if (!pids) {
+        logger_write("Failed to allocate PID array for infinite routine");
+        return NULL;
+    }
+
+    // Each thread creates and kills batch_size processes, iterations times
+    for (unsigned int i = 0; i < iterations_var; i++)
+    {
+        // Create batch_size processes that run indefinitely
+        for (unsigned int j = 0; j < batch_size_var; j++)
+        {
+            // Use the constant directly instead of calling it as a function
+            EvaluatorCodeT code = evaluator_infinite_loop;
+            pids[j] = simulator_create_process(code);
+        }
+
+        // Kill all processes in batch
+        for (unsigned int j = 0; j < batch_size_var; j++)
+        {
+            simulator_kill(pids[j]);
+        }
+
+        // Wait for all processes to finish
+        for (unsigned int j = 0; j < batch_size_var; j++)
+        {
+            simulator_wait(pids[j]);
+        }
+    }
+
+    free(pids);
+    return NULL;
+}
+
 void environment_start(unsigned int thread_count,
                        unsigned int iterations,
                        unsigned int batch_size)
 {
     original_thread_count = thread_count; // Store original count
-    thread_count_var = thread_count * 2;  // Double for both types of threads
+    thread_count_var = thread_count * 3;  // Triple for all three types of threads
     iterations_var = iterations;          // Store iterations
     batch_size_var = batch_size;          // Store batch size
     threads = malloc(sizeof(pthread_t) * thread_count_var);
+    if (!threads) {
+        logger_write("Failed to allocate thread array");
+        return;
+    }
 
     // Create regular terminating threads
     for (unsigned int i = 0; i < thread_count; i++)
     {
         unsigned int *thread_id = malloc(sizeof(unsigned int));
+        if (!thread_id) continue;
         *thread_id = i;
         pthread_create(&threads[i], NULL, terminating_routine, thread_id);
     }
@@ -74,8 +118,18 @@ void environment_start(unsigned int thread_count,
     for (unsigned int i = 0; i < thread_count; i++)
     {
         unsigned int *thread_id = malloc(sizeof(unsigned int));
+        if (!thread_id) continue;
         *thread_id = i + thread_count;
         pthread_create(&threads[i + thread_count], NULL, blocking_routine, thread_id);
+    }
+
+    // Create infinite threads
+    for (unsigned int i = 0; i < thread_count; i++)
+    {
+        unsigned int *thread_id = malloc(sizeof(unsigned int));
+        if (!thread_id) continue;
+        *thread_id = i + (thread_count * 2);
+        pthread_create(&threads[i + (thread_count * 2)], NULL, infinite_routine, thread_id);
     }
 }
 
@@ -89,5 +143,4 @@ void environment_stop()
 	free(threads); // Clean up thread handles
 	threads = NULL;
 	
-	char message[100];
 }
