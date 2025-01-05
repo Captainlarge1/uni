@@ -3,27 +3,34 @@
 
 #define TIME_SLICE_LENGTH 100
 
-typedef enum EvaluatorReason {
-    reason_timeslice_ended,
-    reason_terminated,
-    reason_blocked // Added if used in evaluator.c
-} EvaluatorReasonT;
+typedef enum Reason {
+  reason_terminated,
+  reason_timeslice_ended,
+  reason_blocked,
+} ReasonT;
 
 typedef struct EvaluatorResult {
-    EvaluatorReasonT reason;
-    unsigned int PC;         // Added field
-    unsigned int cpu_time;   // Added field
+  unsigned int PC;
+  unsigned int cpu_time;
+  ReasonT reason;
 } EvaluatorResultT;
 
 typedef struct EvaluatorCode {
-    unsigned int termination_step; // Step at which to terminate
-    unsigned int current_step;     // Current step count
+  EvaluatorResultT (*implementation)(unsigned int, unsigned int);
+  unsigned int parameter;
 } EvaluatorCodeT;
 
-// Initialize an EvaluatorCodeT to terminate after 'steps' steps
+
+// The evaluator - pretends to run some code on a CPU
+EvaluatorResultT evaluator_evaluate(EvaluatorCodeT const code, unsigned int PC);
+
+// A CPU bound process that terminates after specified steps
 EvaluatorCodeT evaluator_terminates_after(unsigned int steps);
 
-// Evaluate the process code, increment step count
-EvaluatorResultT evaluator_evaluate(EvaluatorCodeT* code, unsigned int param); // Changed to pointer
+// A CPU bound process that never terminates
+extern EvaluatorCodeT const evaluator_infinite_loop;
+
+// A process that terminates after specified steps and may block
+EvaluatorCodeT evaluator_blocking_terminates_after(unsigned int steps);
 
 #endif

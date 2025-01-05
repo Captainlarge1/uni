@@ -48,11 +48,13 @@ static void *simulator_routine(void *arg)
 
         if (ret == 0)
         {
-            pthread_mutex_lock(&process_table_mutex); // Lock mutex
+            pthread_mutex_lock(&process_table_mutex);
             ProcessControlBlockT *pcb = &process_table[pid];
             pcb->state = running;
 
-            EvaluatorResultT result = evaluator_evaluate(&pcb->code, 0); // Pass pointer
+            // Pass current PC to evaluator and store result
+            EvaluatorResultT result = evaluator_evaluate(pcb->code, pcb->PC);
+            pcb->PC = result.PC;  // Update PC with result
 
             if (result.reason == reason_terminated)
             {
@@ -325,6 +327,7 @@ ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by
     process_table[pid].pid = pid;
     process_table[pid].code = code; // Copy EvaluatorCodeT
     process_table[pid].state = ready;
+    process_table[pid].PC = 0;  // Initialize PC to 0
     pthread_mutex_unlock(&process_table_mutex); // Unlock mutex
 
     // Add process to ready queue

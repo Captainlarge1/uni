@@ -17,6 +17,7 @@ typedef struct {
     ProcessIdT pid;
     EvaluatorCodeT code;
     ProcessStateT state;
+    unsigned int PC;  // Add PC tracking
 } ProcessControlBlockT;
 
 // Declare an array for storing processes and a ready queue

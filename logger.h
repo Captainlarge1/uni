@@ -5,7 +5,6 @@
 
 extern pthread_mutex_t global_print_mutex;
 
-void logger_log(const char* format, ...);
 
 void logger_start();
 void logger_stop();
