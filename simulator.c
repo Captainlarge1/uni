@@ -15,7 +15,7 @@ pthread_mutex_t process_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t simulator_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t ready_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t event_queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Add mutex for event queue
-extern pthread_mutex_t global_print_mutex; // Declare the global_print_mutex
+extern pthread_mutex_t global_print_mutex;                            // Declare the global_print_mutex
 
 static pthread_t *threads = NULL;
 static int thread_count = 0;
@@ -24,17 +24,17 @@ static ProcessIdT max_pid_count = 0;
 static ProcessControlBlockT *process_table = NULL;
 static NonBlockingQueueT *ready_queue = NULL;
 static NonBlockingQueueT *event_queue = NULL; // Declare event queue
-static int simulator_running = 1; // Add a flag to control the simulator's running state
+static int simulator_running = 1;             // Add a flag to control the simulator's running state
 
 static void *simulator_routine(void *arg)
 {
     int thread_id = *((int *)arg);
-    
+
     // Log thread start with thread type identification
     char message[100];
-    sprintf(message, "Simulator worker thread %d started", thread_id);
+    sprintf(message, "Simulator thread %d started", thread_id);
     logger_write(message);
-    
+
     free(arg);
 
     while (1)
@@ -42,7 +42,8 @@ static void *simulator_routine(void *arg)
         pthread_mutex_lock(&simulator_state_mutex);
         int running_copy = simulator_running;
         pthread_mutex_unlock(&simulator_state_mutex);
-        if (!running_copy) break;
+        if (!running_copy)
+            break;
 
         ProcessIdT pid;
         pthread_mutex_lock(&ready_queue_mutex);
@@ -53,18 +54,22 @@ static void *simulator_routine(void *arg)
         {
             pthread_mutex_lock(&process_table_mutex);
             ProcessControlBlockT *pcb = &process_table[pid];
+            if (pcb->state == terminated)
+            {
+                pthread_mutex_unlock(&process_table_mutex);
+                continue; // Skip terminated processes
+            }
             pcb->state = running;
 
             // Pass current PC to evaluator and store result
             EvaluatorResultT result = evaluator_evaluate(pcb->code, pcb->PC);
-            pcb->PC = result.PC;  // Update PC with result
+            pcb->PC = result.PC; // Update PC with result
 
             if (result.reason == reason_terminated)
             {
                 pcb->state = terminated;
                 pthread_mutex_unlock(&process_table_mutex); // Unlock before blocking operation
                 blocking_queue_push(available_pids, pid);
-
             }
             else if (result.reason == reason_timeslice_ended)
             {
@@ -73,14 +78,12 @@ static void *simulator_routine(void *arg)
                 pthread_mutex_lock(&ready_queue_mutex);
                 non_blocking_queue_push(ready_queue, pid);
                 pthread_mutex_unlock(&ready_queue_mutex);
-
             }
             else if (result.reason == reason_blocked)
             {
                 pcb->state = blocked;
                 pthread_mutex_unlock(&process_table_mutex); // Unlock before handling blocked state
                 // Handle blocked state as needed
-  
 
                 // Add blocked process to event queue
                 pthread_mutex_lock(&event_queue_mutex);
@@ -101,13 +104,16 @@ static void *simulator_routine(void *arg)
         }
     }
 
-    
     return NULL;
 }
 
 void simulator_start(int thread_count_param, int max_processes)
 {
+    
     max_pid_count = max_processes;
+
+    // Calculate initial queue sizes based on max_processes
+    int init_queue_size = max_processes * 2; // Allow for growth
 
     // Initialize PID queue
     available_pids = malloc(sizeof(BlockingQueueT));
@@ -124,147 +130,108 @@ void simulator_start(int thread_count_param, int max_processes)
         return;
     }
 
-    // Fill queue with available PIDs
+    // Pre-fill available PIDs
     for (ProcessIdT pid = 0; pid < max_processes; pid++)
     {
         if (blocking_queue_push(available_pids, pid) != 0)
         {
             logger_write("Failed to push PID to blocking PID queue");
-            // Handle partial initialization if needed
-            // For example, stop initialization and clean up
             simulator_stop();
             return;
         }
     }
 
-    // Initialize process table
+    // Initialize process table with null values
     process_table = malloc(sizeof(ProcessControlBlockT) * max_processes);
     if (process_table == NULL)
     {
         logger_write("Failed to allocate process table");
-        // Clean up previously allocated resources
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
+        simulator_stop();
         return;
     }
     memset(process_table, 0, sizeof(ProcessControlBlockT) * max_processes);
+    
+    // Initialize all PCBs to unallocated state
+    for (ProcessIdT pid = 0; pid < max_processes; pid++) {
+        process_table[pid].state = unallocated;
+        process_table[pid].pid = pid;
+        process_table[pid].PC = 0;
+    }
 
     // Initialize ready queue
     ready_queue = malloc(sizeof(NonBlockingQueueT));
-    if (ready_queue == NULL)
-    {
-        logger_write("Failed to allocate ready queue");
-        // Clean up previously allocated resources
-        free(process_table);
-        process_table = NULL;
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
-        return;
-    }
-    if (non_blocking_queue_create(ready_queue) != 0)
+    if (ready_queue == NULL || non_blocking_queue_create(ready_queue) != 0)
     {
         logger_write("Failed to create ready queue");
-        free(ready_queue);
-        ready_queue = NULL;
-        free(process_table);
-        process_table = NULL;
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
+        simulator_stop();
         return;
     }
 
     // Initialize event queue
     event_queue = malloc(sizeof(NonBlockingQueueT));
-    if (event_queue == NULL)
-    {
-        logger_write("Failed to allocate event queue");
-        // Clean up previously allocated resources
-        non_blocking_queue_destroy(ready_queue);
-        free(ready_queue);
-        ready_queue = NULL;
-        free(process_table);
-        process_table = NULL;
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
-        return;
-    }
-    if (non_blocking_queue_create(event_queue) != 0)
+    if (event_queue == NULL || non_blocking_queue_create(event_queue) != 0)
     {
         logger_write("Failed to create event queue");
-        free(event_queue);
-        event_queue = NULL;
-        non_blocking_queue_destroy(ready_queue);
-        free(ready_queue);
-        ready_queue = NULL;
-        free(process_table);
-        process_table = NULL;
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
+        simulator_stop();
         return;
     }
 
-    // Verify mutex initialization
+    // Initialize all mutexes
     if (pthread_mutex_init(&process_table_mutex, NULL) != 0 ||
         pthread_mutex_init(&simulator_state_mutex, NULL) != 0 ||
         pthread_mutex_init(&ready_queue_mutex, NULL) != 0 ||
-        pthread_mutex_init(&event_queue_mutex, NULL) != 0) {
+        pthread_mutex_init(&event_queue_mutex, NULL) != 0)
+    {
         logger_write("Failed to initialize mutexes");
+        simulator_stop();
         return;
     }
 
-    // Initialize threads
-    thread_count = 2;  // Only create 2 simulator threads
+    // Set up simulator threads
+    thread_count = 2;  // Use exactly 2 worker threads
     threads = malloc(sizeof(pthread_t) * thread_count);
     if (threads == NULL)
     {
-        logger_write("Failed to allocate memory for threads");
-        // Clean up previously allocated resources
-        non_blocking_queue_destroy(event_queue);
-        free(event_queue);
-        event_queue = NULL;
-        non_blocking_queue_destroy(ready_queue);
-        free(ready_queue);
-        ready_queue = NULL;
-        free(process_table);
-        process_table = NULL;
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
+        logger_write("Failed to allocate thread array");
+        simulator_stop();
         return;
     }
 
+    // Set simulator to running state before starting threads
     simulator_running = 1;
 
-    // Create the 2 simulator threads with sequential IDs (0 to 1)
+    // Start worker threads
     for (int i = 0; i < thread_count; i++)
     {
         int *thread_id = malloc(sizeof(int));
         if (thread_id == NULL)
         {
-            logger_write("Failed to allocate thread ID memory");
-            continue;
+            logger_write("Failed to allocate thread ID");
+            simulator_stop();
+            return;
         }
         *thread_id = i;
         if (pthread_create(&threads[i], NULL, simulator_routine, thread_id) != 0)
         {
-            logger_write("Failed to create thread");
+            logger_write("Failed to create worker thread");
             free(thread_id);
-            continue;
+            simulator_stop();
+            return;
         }
     }
+
+
 }
 
 void simulator_stop()
 {
+
+    // Signal threads to stop
     pthread_mutex_lock(&simulator_state_mutex);
-    simulator_running = 0; 
+    simulator_running = 0;
     pthread_mutex_unlock(&simulator_state_mutex);
 
+    // Wait for all simulator threads to finish
     if (threads != NULL)
     {
         for (int i = 0; i < thread_count; i++)
@@ -274,14 +241,18 @@ void simulator_stop()
         free(threads);
         threads = NULL;
     }
-    if (available_pids != NULL)
-    {
-        blocking_queue_destroy(available_pids);
-        free(available_pids);
-        available_pids = NULL;
-    }
 
-    // Clean up ready_queue
+    // Clean up any remaining processes
+    pthread_mutex_lock(&process_table_mutex);
+    for (ProcessIdT pid = 0; pid < max_pid_count; pid++) {
+        if (process_table[pid].state != unallocated) {
+            process_table[pid].state = terminated;
+            char message[100];
+        }
+    }
+    pthread_mutex_unlock(&process_table_mutex);
+
+    // Clean up queues in order
     if (ready_queue != NULL)
     {
         non_blocking_queue_destroy(ready_queue);
@@ -289,7 +260,6 @@ void simulator_stop()
         ready_queue = NULL;
     }
 
-    // Clean up event_queue
     if (event_queue != NULL)
     {
         non_blocking_queue_destroy(event_queue);
@@ -297,20 +267,29 @@ void simulator_stop()
         event_queue = NULL;
     }
 
-    // Clean up process_table
-    pthread_mutex_lock(&process_table_mutex); // Lock before cleanup
+    if (available_pids != NULL)
+    {
+        blocking_queue_destroy(available_pids);
+        free(available_pids);
+        available_pids = NULL;
+    }
+
+    // Clean up process table
+    pthread_mutex_lock(&process_table_mutex);
     if (process_table != NULL)
     {
         free(process_table);
         process_table = NULL;
     }
-    pthread_mutex_unlock(&process_table_mutex); // Unlock after cleanup
+    pthread_mutex_unlock(&process_table_mutex);
 
-    // Destroy all dynamically initialized mutexes
+    // Destroy mutexes in reverse order of creation
     pthread_mutex_destroy(&event_queue_mutex);
     pthread_mutex_destroy(&ready_queue_mutex);
     pthread_mutex_destroy(&simulator_state_mutex);
     pthread_mutex_destroy(&process_table_mutex);
+
+ 
 }
 
 ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by value
@@ -328,7 +307,7 @@ ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by
     process_table[pid].pid = pid;
     process_table[pid].code = code; // Copy EvaluatorCodeT
     process_table[pid].state = ready;
-    process_table[pid].PC = 0;  // Initialize PC to 0
+    process_table[pid].PC = 0;                  // Initialize PC to 0
     pthread_mutex_unlock(&process_table_mutex); // Unlock mutex
 
     // Add process to ready queue
@@ -346,10 +325,15 @@ ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by
 
 void simulator_kill(ProcessIdT pid)
 {
-    if (pid < max_pid_count)
+    pthread_mutex_lock(&process_table_mutex);
+    if (process_table[pid].state != terminated)
     {
-        blocking_queue_push(available_pids, pid);  // Use unsigned int directly
+        process_table[pid].state = terminated;
+        char message[100];
+        sprintf(message, "Killed process with PID %u", pid);
+        logger_write(message);
     }
+    pthread_mutex_unlock(&process_table_mutex);
 }
 
 void simulator_wait(ProcessIdT pid)
