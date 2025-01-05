@@ -29,9 +29,12 @@ static int simulator_running = 1; // Add a flag to control the simulator's runni
 static void *simulator_routine(void *arg)
 {
     int thread_id = *((int *)arg);
-    char message[100];
-    sprintf(message, "Thread %d started", thread_id);
-    logger_write(message); // Add back the logging call
+    
+    // Log thread start with thread type identification
+    pthread_mutex_lock(&global_print_mutex);
+    printf("Simulator worker thread %d started\n", thread_id);
+    pthread_mutex_unlock(&global_print_mutex);
+    
     free(arg);
 
     while (1)
@@ -77,8 +80,7 @@ static void *simulator_routine(void *arg)
                 pcb->state = blocked;
                 pthread_mutex_unlock(&process_table_mutex); // Unlock before handling blocked state
                 // Handle blocked state as needed
-                sprintf(message, "Process %u is blocked", pid);
-                logger_write(message);
+  
 
                 // Add blocked process to event queue
                 pthread_mutex_lock(&event_queue_mutex);
@@ -100,8 +102,10 @@ static void *simulator_routine(void *arg)
         }
     }
 
-    sprintf(message, "Thread %d exiting", thread_id);
-    logger_write(message);
+    pthread_mutex_lock(&global_print_mutex);
+    printf("Simulator worker thread %d exiting\n", thread_id);
+    pthread_mutex_unlock(&global_print_mutex);
+    
     return NULL;
 }
 
@@ -218,7 +222,7 @@ void simulator_start(int thread_count_param, int max_processes)
     }
 
     // Initialize threads
-    thread_count = thread_count_param;
+    thread_count = thread_count_param * 2;  // Double the thread count for both types
     threads = malloc(sizeof(pthread_t) * thread_count);
     if (threads == NULL)
     {
@@ -238,8 +242,9 @@ void simulator_start(int thread_count_param, int max_processes)
         return;
     }
 
-    simulator_running = 1; // Initialize the running flag
+    simulator_running = 1;
 
+    // Create all simulator threads with sequential IDs (0 to thread_count-1)
     for (int i = 0; i < thread_count; i++)
     {
         int *thread_id = malloc(sizeof(int));
@@ -393,8 +398,6 @@ void simulator_event()
 
         // Log the action
         char message[100];
-        sprintf(message, "Moved process %u to the ready queue", pid);
-        logger_write(message);
     }
     else
     {
