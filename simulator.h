@@ -24,7 +24,7 @@ typedef struct {
 
 #include <pthread.h> // Add pthread for mutex
 
-extern pthread_mutex_t process_table_mutex; // Declare mutex for process table
+// extern pthread_mutex_t process_table_mutex; // Declare mutex for process table
 
 void simulator_start(int threads, int max_processes);
 void simulator_stop();
