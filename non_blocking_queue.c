@@ -3,13 +3,18 @@
 
 #include <stdlib.h>
 #include <assert.h>
+#include <pthread.h>
+
+static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void non_blocking_queue_create(NonBlockingQueueT* queue) {
-  queue->capacity = 10; // Initial capacity
+  // Preallocate a larger capacity to avoid repeated malloc calls
+  queue->capacity = 1024; // Adjust as needed
   queue->data = (unsigned int*)malloc(queue->capacity * sizeof(unsigned int));
   queue->front = 0;
   queue->rear = -1;
   queue->size = 0;
+  pthread_mutex_init(&queue_mutex, NULL);
 }
 
 void non_blocking_queue_destroy(NonBlockingQueueT* queue) {
@@ -19,26 +24,33 @@ void non_blocking_queue_destroy(NonBlockingQueueT* queue) {
   queue->front = 0;
   queue->rear = -1;
   queue->size = 0;
+  pthread_mutex_destroy(&queue_mutex);
 }
 
-void non_blocking_queue_push(NonBlockingQueueT* queue, unsigned int value) {
+int non_blocking_queue_push(NonBlockingQueueT* queue, unsigned int value) {
+  pthread_mutex_lock(&queue_mutex);
+  // Check if full; do not resize
   if (queue->size == queue->capacity) {
-    // Resize the queue if it's full
-    queue->capacity *= 2;
-    queue->data = (unsigned int*)realloc(queue->data, queue->capacity * sizeof(unsigned int));
+    pthread_mutex_unlock(&queue_mutex);
+    return -1; // Indicate failure
   }
   queue->rear = (queue->rear + 1) % queue->capacity;
   queue->data[queue->rear] = value;
   queue->size++;
+  pthread_mutex_unlock(&queue_mutex);
+  return 0; // Success
 }
 
 int non_blocking_queue_pop(NonBlockingQueueT* queue, unsigned int* value) {
+  pthread_mutex_lock(&queue_mutex);
   if (queue->size == 0) {
+    pthread_mutex_unlock(&queue_mutex);
     return -1; // Queue is empty, return non-zero value indicating failure
   }
   *value = queue->data[queue->front];
   queue->front = (queue->front + 1) % queue->capacity;
   queue->size--;
+  pthread_mutex_unlock(&queue_mutex);
   return 0; // Success
 }
 

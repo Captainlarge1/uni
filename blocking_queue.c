@@ -1,5 +1,6 @@
 #include "blocking_queue.h"
 #include "utilities.h"
+#include <string.h>
 
 void blocking_queue_terminate(BlockingQueueT* queue) {
   pthread_mutex_lock(&queue->mutex);
@@ -9,6 +10,9 @@ void blocking_queue_terminate(BlockingQueueT* queue) {
 }
 
 void blocking_queue_create(BlockingQueueT* queue) {
+  // Zero out the queue struct
+  memset(queue, 0, sizeof(BlockingQueueT));
+
   queue->list = list_create();
   pthread_mutex_init(&queue->mutex, NULL);
   pthread_cond_init(&queue->cond, NULL);

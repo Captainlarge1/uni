@@ -28,15 +28,15 @@
 #endif
 
 int main() {
-  logger_start();
-  logger_write("Starting simulator");
-  simulator_start(SIMULATOR_THREADS, SIMULATOR_MAX_PROCESSES);
-  event_source_start(EVENT_SOURCE_INTERVAL);
-  environment_start(ENVIRONMENT_THREADS, ITERATIONS, BATCH_SIZE);
-  environment_stop();
-  event_source_stop();
-  simulator_stop();
-  logger_write("Stopping simulator");
-  logger_stop();
-  return 0;
+    logger_start();
+    logger_write("Starting simulator");
+    simulator_start(SIMULATOR_THREADS, SIMULATOR_MAX_PROCESSES);
+    event_source_start(EVENT_SOURCE_INTERVAL);
+    environment_start(ENVIRONMENT_THREADS, ITERATIONS, BATCH_SIZE);
+    environment_stop();
+    event_source_stop();
+    simulator_stop();
+    logger_write("Stopping simulator");
+    logger_stop();
+    return 0;
 }
