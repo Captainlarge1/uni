@@ -4,22 +4,21 @@
 #include "list.h"
 #include <pthread.h>
 
+// Queue structure
 typedef struct NonBlockingQueue {
-  unsigned int* data; // Pointer to the queue's data
-  int capacity;       // Maximum capacity of the queue
-  int front;          // Index of the front element
-  int rear;           // Index of the rear element
-  int size;           // Current size of the queue
-  pthread_mutex_t mutex; // Add mutex to protect the queue
+  unsigned int* data;
+  int capacity;
+  int front;
+  int rear;
+  int size;
+  pthread_mutex_t mutex;
 } NonBlockingQueueT;
 
-// Change return type from void to int
+// Queue operations
 int non_blocking_queue_create(NonBlockingQueueT* queue);
 void non_blocking_queue_destroy(NonBlockingQueueT* queue);
-
 int non_blocking_queue_push(NonBlockingQueueT* queue, unsigned int value);
 int non_blocking_queue_pop(NonBlockingQueueT* queue, unsigned int* value);
-
 int non_blocking_queue_empty(NonBlockingQueueT* queue);
 int non_blocking_queue_length(NonBlockingQueueT* queue);
 

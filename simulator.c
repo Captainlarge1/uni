@@ -4,36 +4,35 @@
 #include "blocking_queue.h"
 #include "utilities.h"
 #include "logger.h"
-#include "evaluator.h" // Include evaluator header
+#include "evaluator.h"
 #include <pthread.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
-#include <unistd.h> // Add for sleep
+#include <unistd.h>
 
+// Core sync primitives
 pthread_mutex_t process_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t simulator_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t ready_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_mutex_t event_queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Add mutex for event queue
-// Remove the check_counter_mutex since we'll make check_counter thread-local
-extern pthread_mutex_t global_print_mutex;                            // Declare the global_print_mutex
+static pthread_mutex_t event_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+extern pthread_mutex_t global_print_mutex;
 
+// Global state
 static pthread_t *threads = NULL;
 static int thread_count = 0;
 static BlockingQueueT *available_pids = NULL;
 static ProcessIdT max_pid_count = 0;
 static ProcessControlBlockT *process_table = NULL;
 static NonBlockingQueueT *ready_queue = NULL;
-static NonBlockingQueueT *event_queue = NULL; // Declare event queue
-static int simulator_running = 1;             // Add a flag to control the simulator's running state
+static NonBlockingQueueT *event_queue = NULL;
+static int simulator_running = 1;
 
 static void *simulator_routine(void *arg)
 {
     int thread_id = *((int *)arg);
-    // Fix order: static must come before __thread
     static __thread int check_counter = 0;
 
-    // Log thread start with thread type identification
     char message[100];
     sprintf(message, "Simulator thread %d started", thread_id);
     logger_write(message);
@@ -42,9 +41,9 @@ static void *simulator_routine(void *arg)
 
     while (1)
     {
-        // No need for mutex since check_counter is now thread-local
         check_counter++;
-        if (check_counter % 1000 == 0) {
+        if (check_counter % 1000 == 0)
+        {
             pthread_mutex_lock(&simulator_state_mutex);
             int running_copy = simulator_running;
             pthread_mutex_unlock(&simulator_state_mutex);
@@ -54,56 +53,62 @@ static void *simulator_routine(void *arg)
 
         ProcessIdT pid;
         int has_work = 0;
-        
+
         // Try ready queue first
         pthread_mutex_lock(&ready_queue_mutex);
         int ret = non_blocking_queue_pop(ready_queue, &pid);
         pthread_mutex_unlock(&ready_queue_mutex);
 
-        if (ret == 0) {
+        if (ret == 0)
+        {
             has_work = 1;
             pthread_mutex_lock(&process_table_mutex);
             ProcessControlBlockT *pcb = &process_table[pid];
-            
-            if (pcb->state != terminated) {
+
+            if (pcb->state != terminated)
+            {
                 pcb->state = running;
                 pthread_mutex_unlock(&process_table_mutex);
 
                 EvaluatorResultT result = evaluator_evaluate(pcb->code, pcb->PC);
-                
+
                 pthread_mutex_lock(&process_table_mutex);
                 pcb->PC = result.PC;
 
-                switch (result.reason) {
-                    case reason_terminated:
-                        pcb->state = terminated;
-                        pthread_mutex_unlock(&process_table_mutex);
-                        blocking_queue_push(available_pids, pid);
-                        break;
-                        
-                    case reason_timeslice_ended:
-                        pcb->state = ready;
-                        pthread_mutex_unlock(&process_table_mutex);
-                        pthread_mutex_lock(&ready_queue_mutex);
-                        non_blocking_queue_push(ready_queue, pid);
-                        pthread_mutex_unlock(&ready_queue_mutex);
-                        break;
-                        
-                    case reason_blocked:
-                        pcb->state = blocked;
-                        pthread_mutex_unlock(&process_table_mutex);
-                        pthread_mutex_lock(&event_queue_mutex);
-                        non_blocking_queue_push(event_queue, pid);
-                        pthread_mutex_unlock(&event_queue_mutex);
-                        break;
+                switch (result.reason)
+                {
+                case reason_terminated:
+                    pcb->state = terminated;
+                    pthread_mutex_unlock(&process_table_mutex);
+                    blocking_queue_push(available_pids, pid);
+                    break;
+
+                case reason_timeslice_ended:
+                    pcb->state = ready;
+                    pthread_mutex_unlock(&process_table_mutex);
+                    pthread_mutex_lock(&ready_queue_mutex);
+                    non_blocking_queue_push(ready_queue, pid);
+                    pthread_mutex_unlock(&ready_queue_mutex);
+                    break;
+
+                case reason_blocked:
+                    pcb->state = blocked;
+                    pthread_mutex_unlock(&process_table_mutex);
+                    pthread_mutex_lock(&event_queue_mutex);
+                    non_blocking_queue_push(event_queue, pid);
+                    pthread_mutex_unlock(&event_queue_mutex);
+                    break;
                 }
-            } else {
+            }
+            else
+            {
                 pthread_mutex_unlock(&process_table_mutex);
             }
         }
 
         // If no work was found, sleep for longer
-        if (!has_work) {
+        if (!has_work)
+        {
             usleep(10000); // Sleep for 10ms instead of 1ms
         }
     }
@@ -192,8 +197,8 @@ void simulator_start(int thread_count_param, int max_processes)
         return;
     }
 
-    // Set up simulator threads
-    thread_count = 2; // Use exactly 2 worker threads
+    // Always use 2 worker threads regardless of parameter
+    thread_count = 2;
     threads = malloc(sizeof(pthread_t) * thread_count);
     if (threads == NULL)
     {
@@ -295,28 +300,30 @@ void simulator_stop()
     pthread_mutex_destroy(&process_table_mutex);
 }
 
-ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by value
+ProcessIdT simulator_create_process(EvaluatorCodeT code)
 {
     // Check if we have available PIDs before trying to create process
-    if (available_pids == NULL) {
+    if (available_pids == NULL)
+    {
         logger_write("PID queue not initialized");
         return 0;
     }
 
     unsigned int tmp_pid = 0;
-    if (blocking_queue_pop(available_pids, &tmp_pid) != 0) {
+    if (blocking_queue_pop(available_pids, &tmp_pid) != 0)
+    {
         logger_write("No available PIDs - system may be overloaded");
         return 0;
     }
     ProcessIdT pid = (ProcessIdT)tmp_pid;
 
-    pthread_mutex_lock(&process_table_mutex); // Lock mutex
+    pthread_mutex_lock(&process_table_mutex);
     // Initialize process control block
     process_table[pid].pid = pid;
-    process_table[pid].code = code; // Copy EvaluatorCodeT
+    process_table[pid].code = code;
     process_table[pid].state = ready;
-    process_table[pid].PC = 0;                  // Initialize PC to 0
-    pthread_mutex_unlock(&process_table_mutex); // Unlock mutex
+    process_table[pid].PC = 0;
+    pthread_mutex_unlock(&process_table_mutex);
 
     // Add process to ready queue
     pthread_mutex_lock(&ready_queue_mutex);
@@ -352,12 +359,13 @@ void simulator_wait(ProcessIdT pid)
     logger_write(message);
 
     // Use more aggressive exponential backoff with timeout
-    int sleep_time = 100; // Start with 0.1ms
+    int sleep_time = 100;        // Start with 0.1ms
     const int max_sleep = 10000; // Max 10ms
     const int timeout = 5000000; // 5 second timeout
     int total_wait = 0;
 
-    while (1) {
+    while (1)
+    {
         pthread_mutex_lock(&process_table_mutex);
         ProcessStateT state = process_table[pid].state;
         pthread_mutex_unlock(&process_table_mutex);
@@ -365,7 +373,8 @@ void simulator_wait(ProcessIdT pid)
         if (state == terminated)
             break;
 
-        if (total_wait >= timeout) {
+        if (total_wait >= timeout)
+        {
             // Force terminate if timeout reached
             logger_write("Wait timeout - forcing process termination");
             simulator_kill(pid);
@@ -374,20 +383,21 @@ void simulator_wait(ProcessIdT pid)
 
         usleep(sleep_time);
         total_wait += sleep_time;
-        
+
         // More aggressive backoff
-        sleep_time = (sleep_time * 3/2 > max_sleep) ? max_sleep : sleep_time * 3/2;
-        
+        sleep_time = (sleep_time * 3 / 2 > max_sleep) ? max_sleep : sleep_time * 3 / 2;
+
         // Periodically trigger event processing
-        if (total_wait % 100000 == 0) { // Every 100ms
+        if (total_wait % 100000 == 0)
+        { // Every 100ms
             simulator_event();
         }
     }
 
     // Clean up process data
-    pthread_mutex_lock(&process_table_mutex); // Lock mutex
+    pthread_mutex_lock(&process_table_mutex);
     process_table[pid].state = unallocated;
-    pthread_mutex_unlock(&process_table_mutex); // Unlock mutex
+    pthread_mutex_unlock(&process_table_mutex);
 
     // Recycle the process ID
     blocking_queue_push(available_pids, pid);
@@ -405,7 +415,7 @@ void simulator_event()
 
         // Log the action
         char message[100];
-        sprintf(message, "Moved process %u to the ready queue from event queue", pid);
+        sprintf(message, "Moved process %u to the ready queue", pid);
         logger_write(message);
     }
     else

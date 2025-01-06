@@ -8,12 +8,13 @@
 #include "logger.h"  // Include logger header for global_print_mutex
 #include <unistd.h>  // Add for usleep declaration
 
-static pthread_t *threads = NULL;								// Declare thread handles
-static unsigned int thread_count_var = 0;						// Add thread count storage
-static unsigned int iterations_var = 0;							// Add iterations storage
-static unsigned int batch_size_var = 0;							// Add batch size storage
-static pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER; // Mutex to ensure single start message
-static unsigned int original_thread_count = 0;					// Add original thread count storage
+// Thread management
+static pthread_t *threads = NULL;
+static unsigned int thread_count_var = 0;
+static unsigned int iterations_var = 0;
+static unsigned int batch_size_var = 0;
+static pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int original_thread_count = 0;
 
 static void *terminating_routine(void *arg)
 {
@@ -64,14 +65,12 @@ static void *infinite_routine(void *arg)
         return NULL;
     }
 
-    // Each thread creates and kills batch_size processes, iterations times
     for (unsigned int i = 0; i < iterations_var; i++)
     {
-        // Add delay between iterations
-        usleep(50000); // 50ms delay between batches
+        // Add cooldown between batches
+        usleep(50000);
         
         int failed_creates = 0;
-        // Create batch_size processes that run indefinitely
         for (unsigned int j = 0; j < batch_size_var; j++)
         {
             EvaluatorCodeT code = evaluator_infinite_loop;
@@ -79,24 +78,18 @@ static void *infinite_routine(void *arg)
             if (pids[j] == 0) {
                 failed_creates++;
                 if (failed_creates > 3) {
-                    // If multiple creates fail, take a break
-                    usleep(100000); // 100ms
+                    usleep(100000);
                     failed_creates = 0;
                 }
-                j--; // Retry this index
+                j--;
                 continue;
             }
         }
 
-        // Kill all processes in batch
+        // Process cleanup
         for (unsigned int j = 0; j < batch_size_var; j++)
         {
             simulator_kill(pids[j]);
-        }
-
-        // Wait for all processes to finish
-        for (unsigned int j = 0; j < batch_size_var; j++)
-        {
             simulator_wait(pids[j]);
         }
     }
