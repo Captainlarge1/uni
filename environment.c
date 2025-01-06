@@ -1,3 +1,5 @@
+// Student: Eitan Papp ID: 20573981
+
 #include "environment.h"
 #include "simulator.h"
 #include "utilities.h"
@@ -6,7 +8,7 @@
 #include <pthread.h> // Add pthread include
 #include <stdio.h>	 // Add for logging
 #include "logger.h"  // Include logger header for global_print_mutex
-#include <unistd.h>  // Add for usleep declaration
+#include <unistd.h>  // Add for usleep declaratio
 
 // Thread management
 static pthread_t *threads = NULL;

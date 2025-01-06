@@ -1,3 +1,5 @@
+// Student: Eitan Papp ID: 20573981
+
 #include "simulator.h"
 #include "list.h"
 #include "non_blocking_queue.h"
