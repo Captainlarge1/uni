@@ -6,6 +6,7 @@
 #include <pthread.h> // Add pthread include
 #include <stdio.h>	 // Add for logging
 #include "logger.h"  // Include logger header for global_print_mutex
+#include <unistd.h>  // Add for usleep declaration
 
 static pthread_t *threads = NULL;								// Declare thread handles
 static unsigned int thread_count_var = 0;						// Add thread count storage
@@ -66,12 +67,25 @@ static void *infinite_routine(void *arg)
     // Each thread creates and kills batch_size processes, iterations times
     for (unsigned int i = 0; i < iterations_var; i++)
     {
+        // Add delay between iterations
+        usleep(50000); // 50ms delay between batches
+        
+        int failed_creates = 0;
         // Create batch_size processes that run indefinitely
         for (unsigned int j = 0; j < batch_size_var; j++)
         {
-            // Use the constant directly instead of calling it as a function
             EvaluatorCodeT code = evaluator_infinite_loop;
             pids[j] = simulator_create_process(code);
+            if (pids[j] == 0) {
+                failed_creates++;
+                if (failed_creates > 3) {
+                    // If multiple creates fail, take a break
+                    usleep(100000); // 100ms
+                    failed_creates = 0;
+                }
+                j--; // Retry this index
+                continue;
+            }
         }
 
         // Kill all processes in batch

@@ -15,6 +15,7 @@ pthread_mutex_t process_table_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t simulator_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t ready_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t event_queue_mutex = PTHREAD_MUTEX_INITIALIZER; // Add mutex for event queue
+// Remove the check_counter_mutex since we'll make check_counter thread-local
 extern pthread_mutex_t global_print_mutex;                            // Declare the global_print_mutex
 
 static pthread_t *threads = NULL;
@@ -29,6 +30,8 @@ static int simulator_running = 1;             // Add a flag to control the simul
 static void *simulator_routine(void *arg)
 {
     int thread_id = *((int *)arg);
+    // Fix order: static must come before __thread
+    static __thread int check_counter = 0;
 
     // Log thread start with thread type identification
     char message[100];
@@ -39,68 +42,69 @@ static void *simulator_routine(void *arg)
 
     while (1)
     {
-        pthread_mutex_lock(&simulator_state_mutex);
-        int running_copy = simulator_running;
-        pthread_mutex_unlock(&simulator_state_mutex);
-        if (!running_copy)
-            break;
+        // No need for mutex since check_counter is now thread-local
+        check_counter++;
+        if (check_counter % 1000 == 0) {
+            pthread_mutex_lock(&simulator_state_mutex);
+            int running_copy = simulator_running;
+            pthread_mutex_unlock(&simulator_state_mutex);
+            if (!running_copy)
+                break;
+        }
 
         ProcessIdT pid;
+        int has_work = 0;
+        
+        // Try ready queue first
         pthread_mutex_lock(&ready_queue_mutex);
         int ret = non_blocking_queue_pop(ready_queue, &pid);
         pthread_mutex_unlock(&ready_queue_mutex);
 
-        if (ret == 0)
-        {
+        if (ret == 0) {
+            has_work = 1;
             pthread_mutex_lock(&process_table_mutex);
             ProcessControlBlockT *pcb = &process_table[pid];
-            if (pcb->state == terminated)
-            {
+            
+            if (pcb->state != terminated) {
+                pcb->state = running;
                 pthread_mutex_unlock(&process_table_mutex);
-                continue; // Skip terminated processes
-            }
-            pcb->state = running;
 
-            // Pass current PC to evaluator and store result
-            EvaluatorResultT result = evaluator_evaluate(pcb->code, pcb->PC);
-            pcb->PC = result.PC; // Update PC with result
+                EvaluatorResultT result = evaluator_evaluate(pcb->code, pcb->PC);
+                
+                pthread_mutex_lock(&process_table_mutex);
+                pcb->PC = result.PC;
 
-            if (result.reason == reason_terminated)
-            {
-                pcb->state = terminated;
-                pthread_mutex_unlock(&process_table_mutex); // Unlock before blocking operation
-                blocking_queue_push(available_pids, pid);
-            }
-            else if (result.reason == reason_timeslice_ended)
-            {
-                pcb->state = ready;
-                pthread_mutex_unlock(&process_table_mutex); // Unlock before re-queuing
-                pthread_mutex_lock(&ready_queue_mutex);
-                non_blocking_queue_push(ready_queue, pid);
-                pthread_mutex_unlock(&ready_queue_mutex);
-            }
-            else if (result.reason == reason_blocked)
-            {
-                pcb->state = blocked;
-                pthread_mutex_unlock(&process_table_mutex); // Unlock before handling blocked state
-                // Handle blocked state as needed
-
-                // Add blocked process to event queue
-                pthread_mutex_lock(&event_queue_mutex);
-                non_blocking_queue_push(event_queue, pid);
-                pthread_mutex_unlock(&event_queue_mutex);
-            }
-            else
-            {
-                pthread_mutex_unlock(&process_table_mutex); // Unlock in case of unexpected result
-                sprintf(message, "Unexpected result.reason: %d for process %u", result.reason, pid);
-                logger_write(message);
+                switch (result.reason) {
+                    case reason_terminated:
+                        pcb->state = terminated;
+                        pthread_mutex_unlock(&process_table_mutex);
+                        blocking_queue_push(available_pids, pid);
+                        break;
+                        
+                    case reason_timeslice_ended:
+                        pcb->state = ready;
+                        pthread_mutex_unlock(&process_table_mutex);
+                        pthread_mutex_lock(&ready_queue_mutex);
+                        non_blocking_queue_push(ready_queue, pid);
+                        pthread_mutex_unlock(&ready_queue_mutex);
+                        break;
+                        
+                    case reason_blocked:
+                        pcb->state = blocked;
+                        pthread_mutex_unlock(&process_table_mutex);
+                        pthread_mutex_lock(&event_queue_mutex);
+                        non_blocking_queue_push(event_queue, pid);
+                        pthread_mutex_unlock(&event_queue_mutex);
+                        break;
+                }
+            } else {
+                pthread_mutex_unlock(&process_table_mutex);
             }
         }
-        else
-        {
-            // Optionally sleep to prevent busy waiting
-            usleep(1000); // Sleep for 1ms
+
+        // If no work was found, sleep for longer
+        if (!has_work) {
+            usleep(10000); // Sleep for 10ms instead of 1ms
         }
     }
 
@@ -293,10 +297,15 @@ void simulator_stop()
 
 ProcessIdT simulator_create_process(EvaluatorCodeT code) // Changed to accept by value
 {
+    // Check if we have available PIDs before trying to create process
+    if (available_pids == NULL) {
+        logger_write("PID queue not initialized");
+        return 0;
+    }
+
     unsigned int tmp_pid = 0;
-    if (blocking_queue_pop(available_pids, &tmp_pid) != 0)
-    {
-        logger_write("Failed to pop from PID queue");
+    if (blocking_queue_pop(available_pids, &tmp_pid) != 0) {
+        logger_write("No available PIDs - system may be overloaded");
         return 0;
     }
     ProcessIdT pid = (ProcessIdT)tmp_pid;
@@ -342,18 +351,37 @@ void simulator_wait(ProcessIdT pid)
     sprintf(message, "Waiting for process with PID %u", pid);
     logger_write(message);
 
-    // Wait until the process state is terminated
-    while (1)
-    {
-        pthread_mutex_lock(&process_table_mutex); // Lock mutex
+    // Use more aggressive exponential backoff with timeout
+    int sleep_time = 100; // Start with 0.1ms
+    const int max_sleep = 10000; // Max 10ms
+    const int timeout = 5000000; // 5 second timeout
+    int total_wait = 0;
+
+    while (1) {
+        pthread_mutex_lock(&process_table_mutex);
         ProcessStateT state = process_table[pid].state;
-        pthread_mutex_unlock(&process_table_mutex); // Unlock mutex
+        pthread_mutex_unlock(&process_table_mutex);
 
         if (state == terminated)
             break;
 
-        // Sleep to prevent busy waiting
-        usleep(1000); // Sleep for 1ms
+        if (total_wait >= timeout) {
+            // Force terminate if timeout reached
+            logger_write("Wait timeout - forcing process termination");
+            simulator_kill(pid);
+            break;
+        }
+
+        usleep(sleep_time);
+        total_wait += sleep_time;
+        
+        // More aggressive backoff
+        sleep_time = (sleep_time * 3/2 > max_sleep) ? max_sleep : sleep_time * 3/2;
+        
+        // Periodically trigger event processing
+        if (total_wait % 100000 == 0) { // Every 100ms
+            simulator_event();
+        }
     }
 
     // Clean up process data
